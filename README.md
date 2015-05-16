@@ -13,7 +13,7 @@ Hygiene is an old friend of mine. I worked with Mitch Wand and Paul Stansifer on
 
 ## Intent: High level
 
-Macros that introduce binding structure (e.g., ```racket match``` and ```racket for/fold```) from their input (and elsewhere) do so within the procedural understanding of Dybvig's algorithm. It is mostly natural, but there are meta-level, say, "contracts" that we may wish to express and enforce that can help us debug macro implementations. A contract allows us to state both what definitions a macro will introduce into the current definition context, and which identifiers in the macro input will bind where. If we have a contract system, we can even communicate with compile-time information to state that a contract associated with a syntax object stored previously in a table must be respected in a specific place.
+Macros that introduce binding structure (e.g., `match` and `for/fold`) from their input (and elsewhere) do so within the procedural understanding of Dybvig's algorithm. It is mostly natural, but there are meta-level, say, "contracts" that we may wish to express and enforce that can help us debug macro implementations. A contract allows us to state both what definitions a macro will introduce into the current definition context, and which identifiers in the macro input will bind where. If we have a contract system, we can even communicate with compile-time information to state that a contract associated with a syntax object stored previously in a table must be respected in a specific place.
 
 Dybvig's algorithm provides a protection boundary between macro applications and their enclosing scopes. The protection gets resolved in a late-binding what-you-get-is-what-you-meant kind of way. There is no way to state what should happen up front. The marks Dybvig introduces are "usually" what you want, but with "dumpster diving," you can "hygienically" rebind names that [you really shouldn't be able to](http://okmij.org/ftp/Scheme/macros.html#dirty-macros). We want a specification mechanism that is protectable.
 
@@ -23,7 +23,7 @@ Dybvig's algorithm provides a protection boundary between macro applications and
 ```racket
 (struct Foo (x y))
 ```
-The canonical example for a well-behaved "non-hygienic" macro in the Racket community is ```racket struct```. We know that this form will introduce phase 0 definitions for
+The canonical example for a well-behaved "non-hygienic" macro in the Racket community is `struct`. We know that this form will introduce phase 0 definitions for
 
 ```racket
 Foo
@@ -31,7 +31,7 @@ Foo?
 Foo-x
 Foo-y
 ```
-And a phase 1 definition for ```racket Foo```, and these identifiers should all be considered in the same binding context as the original ```racket Foo```.
+And a phase 1 definition for `Foo`, and these identifiers should all be considered in the same binding context as the original `Foo`.
 
 We should be able to simply state this and check either
    (a) all these and only these identifiers are introduced definitions by the macro application, or
@@ -243,7 +243,7 @@ Unfortunately for strong typing, Typed Racket's `define-refinement` appears to b
 ```racket
 (define-type S-Identifier Stx)
 ```
-Now, an environment is much like it was in the JFP model, except now we have `'Letrec-Syntax` instead of `Let-Syntax`:
+Now, an environment is much like it was in the JFP model, except now we have `'Letrec-Syntax` instead of `'
 ```racket
 (struct VarTrans ([id : S-Identifier]) #:transparent)
 ;; Model doesn't have a stop set? Let-Syntax is now Letrec-Syntax..?
