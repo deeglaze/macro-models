@@ -19,7 +19,7 @@ Hygiene is an old friend of mine. I worked with Mitch Wand and Paul Stansifer on
 
 Macros that introduce binding structure (e.g., ```racket match``` and ```racket for/fold```) from their input (and elsewhere) do so within the procedural understanding of Dybvig's algorithm. It is mostly natural, but there are meta-level, say, "contracts" that we may wish to express and enforce that can help us debug macro implementations. A contract allows us to state both what definitions a macro will introduce into the current definition context, and which identifiers in the macro input will bind where. If we have a contract system, we can even communicate with compile-time information to state that a contract associated with a syntax object stored previously in a table must be respected in a specific place.
 
-Dybvig's algorithm provides a protection boundary between macro applications and their enclosing scopes. The protection gets resolved in a late-binding what-you-get-is-what-you-meant kind of way. There is no way to state what should happen up front. The marks Dybvig introduces are "usually" what you want, but with "dumpster diving," you can "hygienically" rebind names that you really shouldn't be able to [1]. We want a specification mechanism that is protectable.
+Dybvig's algorithm provides a protection boundary between macro applications and their enclosing scopes. The protection gets resolved in a late-binding what-you-get-is-what-you-meant kind of way. There is no way to state what should happen up front. The marks Dybvig introduces are "usually" what you want, but with "dumpster diving," you can "hygienically" rebind names that [you really shouldn't be able to][oleg]. We want a specification mechanism that is protectable.
 
 ### Examples:
 
@@ -76,7 +76,8 @@ This ADT-like language can be interpreted in the set-of-scopes model as a scope 
 
 This is all well and good for treating `let*` as a core form, but how do we ensure that the original binding structure as described here is implemented by the expanded form? Can we make a "scope intent" that will raise an error if it lands in a core form that doesn't treat the scope in the intended way?
 
-If we accidentally implement `let` instead of `let*`, the macro expander should error on expanding ```racket
+If we accidentally implement `let` instead of `let*`, the macro expander should error on expanding
+```racket
 (let ([x 0])
  (let* ([x x]
         [y x])
@@ -133,4 +134,4 @@ The final expansion resolves all the names
 
 We will see if intent permutations are really all we need. I foresee problems arising when we delegate binding responsibilities to other macros - who is at fault for failing to produce the expected binding structure? Can we catch intent mismatch when two intents are given to the same identifier?
 
-[1] Oleg Kiselyov http://okmij.org/ftp/Scheme/macros.html#dirty-macros
+[oleg]: Oleg Kiselyov http://okmij.org/ftp/Scheme/macros.html#dirty-macros
