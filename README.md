@@ -4,11 +4,7 @@ This repository houses Typed Racket implementations of the JFP 2012 "Macros that
 
 This README will act as a development journal as I decipher the prose into a model comparable to the JFP model.
 
-# Experimental notes on "Set of Scopes" binding
-
-These notes are with respect to Matthew Flatt's notes regarding Racket's new experimental macro expander:
-
-  http://www.cs.utah.edu/~mflatt/scope-sets-4/
+# Goals of this experiment
 
 Hygiene is an old friend of mine. I worked with Mitch Wand and Paul Stansifer on binding-safe metaprogramming, and binding shape specification. The new model for Racket's hygienic macro expander offers more opportunities for exploring the possibilities of expanding the meaning of hygiene. There are two ways to expand hygiene that I'm concerned with:
 
@@ -133,3 +129,129 @@ The final expansion resolves all the names
 ```
 
 We will see if intent permutations are really all we need. I foresee problems arising when we delegate binding responsibilities to other macros - who is at fault for failing to produce the expected binding structure? Can we catch intent mismatch when two intents are given to the same identifier?
+
+# Experimental notes on "Set of Scopes" binding
+
+These notes are with respect to Matthew Flatt's notes regarding Racket's new experimental macro expander:
+
+  http://www.cs.utah.edu/~mflatt/scope-sets-4/
+
+The model at the end of these notes is missing definitions, and the definition of `prune` has an obvious copy/paste error: the "recursive" call is actually to `strip`, which is an error at least in my understanding.
+
+The missing definitions are `eval`, `fresh`, `fresh-scope`, `mark`, and `biggest-subset`.
+
+First let's discuss the main data structures used in the notes' partial model:
+
+A `DefCtxStore`, what the notes denote with `Σ`, is a burrito for the "fresh monad" and the "state monad". A `Σ` models two global, mutable values for creating unique scopes (a counter, AKA the "fresh monad"), and a table that maps a base symbol plus a set of scopes to a unique name.
+I represent this in Typed Racket in the following way:
+```racket
+(define-type Resolution (HashTable Ctx Name))
+(define-type Binds (HashTable Name Resolution))
+(struct DefCtxStore ([count : Exact-Nonnegative-Integer]
+                     [rib : Binds]))
+```
+Where a name is modeled by a symbol, as well as scopes and definition context "addresses". The notion of an "address" is an artifact of the JFP model. I've inferred its presence here, since the notes' model does not mention definition contexts.
+```racket
+(define-type Name Symbol)
+(define-type Scope Name)
+(define-type Addr Name)
+(define-type Ctx (Setof Scope))
+```
+The nested hash table for names and contexts is a currying of the `(name ctx)` pair.
+
+A piece of syntax attaches a `Ctx` to either an `Atom` or a list of syntax.
+
+## `biggest-subset` finds the lexically closest binder
+
+If an identifier has been bound by a binding form, it is mapped in `Σ` for later resolution.
+If it is unbound, the identifier's resolution is simply its symbol.
+If it is bound, it can be marked by several extra scopes that did not actually bind the identifier's symbol, so resolution searches for the largest mapped subset of the reference's set of scopes.
+If there are multiple "largest" subsets, then we've hit an ambiguous reference. Otherwise, resolution returns the name mapped by the largest context.
+
+```racket
+(define (biggest-subset-name who ctx resolutions)
+  (define-values (name-biggest dummy num-equal)
+    (for/fold ([mnam : Name (hash-ref resolutions ∅ (λ _ who))]
+               [msize : Exact-Nonnegative-Integer 0]
+               [num : Exact-Nonnegative-Integer 1])
+        ([(c n) (in-hash resolutions)]
+         #:when (subset? c ctx))
+      (define c-size (set-count c))
+      (cond
+       [(< c-size msize) (values mnam msize num)]
+       ;; will lead to an error if c is the largest.
+       ;; We thus don't care which name propagates here.
+       [(= c-size msize) (values n msize (add1 num))]
+       [else (values n c-size 1)])))
+  (unless (= num-equal 1)
+    (error 'biggest-subset "Ambiguous identifier: ~a" who))
+  name-biggest)
+```
+Notice that the currying in the representation allows this function to easily focus on the identifier's symbolic base.
+
+For better debugging, the `(= c-size msize)` case could construct a list of all the "largest subsets" seen, but I elide good error reporting for simplicity of studying the model.
+ 
+## Both `fresh` and `fresh-scope` use the fresh monad
+
+The number component of Matthew's `Sto` container (my `DefCtxStore` container) is the source of uniqueness for name construction. Every name is suffixed by a count that is always increased after a name is requested.
+```racket
+(define (fresh-name stx Σ)
+  (match stx
+    [(Stx (Sym nam) ctx)
+     (match-define (DefCtxStore count rib) Σ)
+     (values (string->symbol (format "~a~a" nam Σ))
+             (DefCtxStore (add1 count) rib))]))
+(define fresh-scope fresh-name)
+```
+
+## Marking has modes
+
+The notes describe that the marking process has three separate modes: add a scope, remove a scope, and flip a scope. The last mode is the familiar one from Dybvig's algorithm. It is the one I assume is meant when `mark` is written in Matthew's model.
+
+The modes are implemented in a straight-forward manner:
+```racket
+(define-type Mode (U 'flip 'add 'remove))
+(: mode->op : (-> Mode (-> Ctx Scope Ctx)))
+(define (mode->op mode)
+  (case mode
+    [(flip) (λ (ctx scp) (if (set-member? ctx scp)
+                             (set-remove ctx scp)
+                             (set-add ctx scp)))]
+    [(add) (λ (ctx scp) (set-add ctx scp))]
+    [(remove) (λ (ctx scp) (set-remove ctx scp))]))
+```
+
+For use by the fold over `Stx` that `mark` does in the JFP model, except a context is now just a set of scopes.
+```racket
+(: mark : (->* (Stx Scope) (Mode) Stx))
+(define (mark stx scp [mode 'flip])
+  (define op (mode->op mode))
+  (let go : Stx ([stx : Stx stx])
+   (match stx
+     [(Stx (? atom? a) ctx)
+      (Stx a (op ctx scp))]
+     [(Stx (? list? stxs) ctx)
+      (Stx (for/list : (Listof Stx) ([stx (in-list stxs)]) (go stx))
+           (op ctx scp))])))
+```
+
+## Expression evalution
+
+The notes' model is clearly incomplete, because `eval` must have access to the global table of identifier resolutions and the environment assigning meaning to names. This is where most of my guesswork is.
+
+Unfortunately for strong typing, Typed Racket's `define-refinement` appears to be an the fritz, so I can't statically identify which subset of `Stx` is an identifier. I use a type alias to keep myself a bit more honest.
+```racket
+(define-type S-Identifier Stx)
+```
+Now, an environment is much like it was in the JFP model, except now we have `'Letrec-Syntax` instead of `Let-Syntax`:
+```racket
+(struct VarTrans ([id : S-Identifier]) #:transparent)
+;; Model doesn't have a stop set? Let-Syntax is now Letrec-Syntax..?
+(define-type Transform (U 'Fun 'Letrec-Syntax 'Quote VarTrans Val))
+(define-type Env (HashTable Name Transform))
+```
+
+I then expect the type signature of `eval` to be
+```racket
+(: seval : (-> Ast Env Ctx DefCtxStore (Values Val Env DefCtxStore)))
+```
